@@ -39,6 +39,7 @@
 //   const [loading, setLoading] = useState(true);
 //   const [submitting, setSubmitting] = useState(false);
 //   const [checkingInId, setCheckingInId] = useState(null);
+//   const [selectedAttendee, setSelectedAttendee] = useState(null);
 
 //   const filteredAttendees = useMemo(() => {
 //     const query = search.trim().toLowerCase();
@@ -490,23 +491,35 @@
 //                           </td>
 
 //                           <td>
-//                             <button
-//                               className="table-action"
-//                               onClick={() =>
-//                                 handleCheckIn(attendee.id)
-//                               }
-//                               disabled={
-//                                 attendee.checked_in ||
-//                                 checkingInId !== null
-//                               }
-//                               title={
-//                                 attendee.checked_in
-//                                   ? "Already checked in"
-//                                   : "Check in attendee"
-//                               }
-//                             >
-//                               <ArrowUpRight size={16} />
-//                             </button>
+//                             <div className="table-action-group">
+//                               <button
+//                                 type="button"
+//                                 className="table-action"
+//                                 onClick={() => setSelectedAttendee(attendee)}
+//                                 title="View QR pass"
+//                                 aria-label={`View QR pass for ${attendee.name}`}
+//                               >
+//                                 <QrCode size={16} />
+//                               </button>
+
+//                               <button
+//                                 type="button"
+//                                 className="table-action"
+//                                 onClick={() => handleCheckIn(attendee.id)}
+//                                 disabled={
+//                                   attendee.checked_in ||
+//                                   checkingInId !== null
+//                                 }
+//                                 title={
+//                                   attendee.checked_in
+//                                     ? "Already checked in"
+//                                     : "Check in attendee"
+//                                 }
+//                                 aria-label={`Check in ${attendee.name}`}
+//                               >
+//                                 <ArrowUpRight size={16} />
+//                               </button>
+//                             </div>
 //                           </td>
 //                         </tr>
 //                       ))}
@@ -548,6 +561,13 @@
 //           </footer>
 //         </div>
 //       </main>
+
+//       {selectedAttendee && (
+//         <QRPass
+//           attendee={selectedAttendee}
+//           onClose={() => setSelectedAttendee(null)}
+//         />
+//       )}
 //     </div>
 //   );
 // }
@@ -569,9 +589,9 @@
 // export default App;
 
 
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import QRPass from "./components/QRPass";
+import QRScanner from "./components/QRScanner";
 import {
   LayoutDashboard,
   ScanLine,
@@ -918,6 +938,7 @@ function App() {
             />
           </section>
 
+          {activePage === "Dashboard" ? (
           <div className="content-grid">
             <section
               className="panel registration-panel"
@@ -1126,6 +1147,9 @@ function App() {
               </div>
             </section>
           </div>
+          ) : (
+            <QRScanner onCheckedIn={refreshDashboard} />
+          )}
 
           <footer className="page-footer">
             <span>GatePass · Event operations made simpler</span>
