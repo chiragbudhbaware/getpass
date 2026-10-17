@@ -916,3 +916,10 @@ td code {
     padding: 22px 18px;
   }
 }
+
+.table-action-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
