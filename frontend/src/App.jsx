@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   LayoutDashboard,
   ScanLine,
@@ -13,46 +13,31 @@ import {
   Menu,
   X,
 } from "lucide-react";
+import {
+  getAttendees,
+  createAttendee,
+  getStats,
+  checkInAttendee,
+} from "./services/api";
 import "./App.css";
 
-const initialAttendees = [
-  {
-    id: 1,
-    name: "Aarav Sharma",
-    email: "aarav@example.com",
-    passCode: "GP-A83F21D9",
-    checkedIn: true,
-  },
-  {
-    id: 2,
-    name: "Priya Patel",
-    email: "priya@example.com",
-    passCode: "GP-B72C19E4",
-    checkedIn: false,
-  },
-  {
-    id: 3,
-    name: "Rohan Deshmukh",
-    email: "rohan@example.com",
-    passCode: "GP-C91A47F2",
-    checkedIn: false,
-  },
-];
-
 function App() {
-  const [attendees, setAttendees] = useState(initialAttendees);
+  const [attendees, setAttendees] = useState([]);
+  const [stats, setStats] = useState({
+    total_registered: 0,
+    checked_in: 0,
+    remaining: 0,
+  });
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [search, setSearch] = useState("");
   const [activePage, setActivePage] = useState("Dashboard");
   const [notice, setNotice] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  const checkedInCount = attendees.filter(
-    (attendee) => attendee.checkedIn
-  ).length;
-
-  const remainingCount = attendees.length - checkedInCount;
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [checkingInId, setCheckingInId] = useState(null);
 
   const filteredAttendees = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -61,83 +46,147 @@ function App() {
       (attendee) =>
         attendee.name.toLowerCase().includes(query) ||
         attendee.email.toLowerCase().includes(query) ||
-        attendee.passCode.toLowerCase().includes(query)
+        attendee.pass_code.toLowerCase().includes(query)
     );
   }, [attendees, search]);
 
-  function handleRegister(event) {
+  const refreshDashboard = useCallback(async () => {
+    try {
+      const [attendeeData, statsData] = await Promise.all([
+        getAttendees(),
+        getStats(),
+      ]);
+
+      setAttendees(attendeeData);
+      setStats(statsData);
+    } catch (error) {
+      console.error("Dashboard loading failed:", error);
+
+      setNotice(
+        "Unable to load dashboard. Make sure the FastAPI server is running."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshDashboard();
+  }, [refreshDashboard]);
+
+  async function handleRegister(event) {
     event.preventDefault();
 
-    if (!name.trim() || !email.trim()) {
-      setNotice("Please enter the attendee's name and email.");
-      return;
-    }
+    if (submitting) return;
 
+    const normalizedName = name.trim();
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      setNotice("Please enter a valid email address.");
+    if (normalizedName.length < 2) {
+      setNotice("Name must contain at least 2 characters.");
       return;
     }
 
-    if (
-      attendees.some(
-        (attendee) => attendee.email.toLowerCase() === normalizedEmail
-      )
-    ) {
-      setNotice("This email is already registered.");
+    if (!normalizedEmail) {
+      setNotice("Please enter an email address.");
       return;
     }
 
-    const passCode = `GP-${crypto.randomUUID()
-      .replaceAll("-", "")
-      .slice(0, 8)
-      .toUpperCase()}`;
+    setSubmitting(true);
+    setNotice("");
 
-    const newAttendee = {
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      email: normalizedEmail,
-      passCode,
-      checkedIn: false,
-    };
+    try {
+      const attendee = await createAttendee({
+        name: normalizedName,
+        email: normalizedEmail,
+      });
 
-    setAttendees((current) => [newAttendee, ...current]);
-    setName("");
-    setEmail("");
-    setNotice("Attendee registered successfully!");
+      setName("");
+      setEmail("");
+
+      await refreshDashboard();
+
+      setNotice(
+        `Attendee registered successfully! Pass: ${attendee.pass_code}`
+      );
+    } catch (error) {
+      console.error("Registration failed:", error);
+
+      const detail = error.response?.data?.detail;
+
+      let message = "Registration failed. Please try again.";
+
+      if (error.response?.status === 409) {
+        message = "This email is already registered.";
+      } else if (typeof detail === "string") {
+        message = detail;
+      } else if (error.request && !error.response) {
+        message = "Cannot reach the backend. Check that FastAPI is running.";
+      }
+
+      setNotice(message);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  function handleCheckIn(attendeeId) {
-    const attendee = attendees.find((item) => item.id === attendeeId);
+  async function handleCheckIn(attendeeId) {
+    if (checkingInId !== null) return;
+
+    const attendee = attendees.find(
+      (item) => item.id === attendeeId
+    );
 
     if (!attendee) return;
 
-    if (attendee.checkedIn) {
+    if (attendee.checked_in) {
       setNotice(`${attendee.name} has already checked in.`);
       return;
     }
 
-    setAttendees((current) =>
-      current.map((item) =>
-        item.id === attendeeId ? { ...item, checkedIn: true } : item
-      )
-    );
+    setCheckingInId(attendeeId);
+    setNotice("");
 
-    setNotice(`${attendee.name} checked in successfully!`);
+    try {
+      const result = await checkInAttendee(attendee.pass_code);
+
+      await refreshDashboard();
+
+      setNotice(
+        result.message || `${attendee.name} checked in successfully!`
+      );
+    } catch (error) {
+      console.error("Check-in failed:", error);
+
+      const detail = error.response?.data?.detail;
+
+      setNotice(
+        typeof detail === "string"
+          ? detail
+          : "Check-in failed. Please try again."
+      );
+
+      await refreshDashboard();
+    } finally {
+      setCheckingInId(null);
+    }
   }
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}>
+      <aside
+        className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}
+      >
         <div className="brand">
           <div className="brand-mark">
             <QrCode size={23} />
           </div>
+
           <div>
             <h1>GatePass</h1>
             <span>EVENT MANAGEMENT</span>
           </div>
+
           <button
             className="icon-button mobile-close"
             onClick={() => setMobileMenuOpen(false)}
@@ -181,15 +230,18 @@ function App() {
           <div className="event-icon">
             <CalendarDays size={20} />
           </div>
+
           <div>
             <strong>Tech Connect 2026</strong>
             <span>Sample event</span>
           </div>
+
           <span className="event-dot" />
         </div>
 
         <div className="sidebar-footer">
           <div className="avatar">GP</div>
+
           <div>
             <strong>Event Organizer</strong>
             <span>Organizer workspace</span>
@@ -222,11 +274,13 @@ function App() {
           <section className="page-heading">
             <div>
               <div className="eyebrow">EVENT OVERVIEW</div>
+
               <h2>
                 {activePage === "Dashboard"
                   ? "Good to see you."
                   : "Event Check-In"}
               </h2>
+
               <p>
                 {activePage === "Dashboard"
                   ? "Manage registrations and keep your event running smoothly."
@@ -237,10 +291,12 @@ function App() {
             <button
               className="primary-button"
               onClick={() =>
-                document.getElementById("registration-form")?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "center",
-                })
+                document
+                  .getElementById("registration-form")
+                  ?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "center",
+                  })
               }
             >
               <Plus size={18} />
@@ -251,6 +307,7 @@ function App() {
           {notice && (
             <div className="notice" role="status">
               <span>{notice}</span>
+
               <button
                 className="icon-button"
                 onClick={() => setNotice("")}
@@ -264,21 +321,23 @@ function App() {
           <section className="stats-grid">
             <StatCard
               label="Total Registered"
-              value={attendees.length}
+              value={stats.total_registered}
               detail="All event registrations"
               icon={<Users size={21} />}
               variant="blue"
             />
+
             <StatCard
               label="Checked In"
-              value={checkedInCount}
+              value={stats.checked_in}
               detail="Successfully admitted"
               icon={<UserCheck size={21} />}
               variant="green"
             />
+
             <StatCard
               label="Awaiting Entry"
-              value={remainingCount}
+              value={stats.remaining}
               detail="Not checked in yet"
               icon={<Ticket size={21} />}
               variant="orange"
@@ -286,28 +345,39 @@ function App() {
           </section>
 
           <div className="content-grid">
-            <section className="panel registration-panel" id="registration-form">
+            <section
+              className="panel registration-panel"
+              id="registration-form"
+            >
               <div className="panel-heading">
                 <div>
                   <h3>Register attendee</h3>
                   <p>Add a guest to your event.</p>
                 </div>
+
                 <div className="heading-icon">
                   <Plus size={20} />
                 </div>
               </div>
 
-              <form onSubmit={handleRegister} className="registration-form">
+              <form
+                onSubmit={handleRegister}
+                className="registration-form"
+              >
                 <label htmlFor="attendee-name">Full name</label>
+
                 <input
                   id="attendee-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="e.g. Aarav Sharma"
+                  minLength={2}
+                  maxLength={100}
                   required
                 />
 
                 <label htmlFor="attendee-email">Email address</label>
+
                 <input
                   id="attendee-email"
                   type="email"
@@ -317,9 +387,15 @@ function App() {
                   required
                 />
 
-                <button type="submit" className="primary-button full-button">
+                <button
+                  type="submit"
+                  className="primary-button full-button"
+                  disabled={submitting}
+                >
                   <Plus size={18} />
-                  Register attendee
+                  {submitting
+                    ? "Registering..."
+                    : "Register attendee"}
                 </button>
 
                 <p className="form-note">
@@ -335,13 +411,15 @@ function App() {
                   <h3>Attendee registrations</h3>
                   <p>Manage registered event guests.</p>
                 </div>
+
                 <span className="count-pill">
-                  {attendees.length} attendees
+                  {stats.total_registered} attendees
                 </span>
               </div>
 
               <div className="search-box">
                 <Search size={18} />
+
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
@@ -362,68 +440,102 @@ function App() {
                   </thead>
 
                   <tbody>
-                    {filteredAttendees.map((attendee) => (
-                      <tr key={attendee.id}>
-                        <td>
-                          <div className="attendee-cell">
-                            <div className="attendee-avatar">
-                              {attendee.name
-                                .split(" ")
-                                .map((part) => part[0])
-                                .slice(0, 2)
-                                .join("")
-                                .toUpperCase()}
-                            </div>
-                            <div>
-                              <strong>{attendee.name}</strong>
-                              <span>{attendee.email}</span>
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <code>{attendee.passCode}</code>
-                        </td>
-                        <td>
-                          <span
-                            className={`status-badge ${
-                              attendee.checkedIn ? "status-checked" : "status-pending"
-                            }`}
-                          >
-                            <span />
-                            {attendee.checkedIn ? "Checked in" : "Pending"}
-                          </span>
-                        </td>
-                        <td>
-                          <button
-                            className="table-action"
-                            onClick={() => handleCheckIn(attendee.id)}
-                            title="Demo check-in"
-                          >
-                            <ArrowUpRight size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-
-                    {filteredAttendees.length === 0 && (
+                    {loading && (
                       <tr>
                         <td colSpan="4" className="empty-state">
-                          No attendees found.
+                          Loading attendees...
                         </td>
                       </tr>
                     )}
+
+                    {!loading &&
+                      filteredAttendees.map((attendee) => (
+                        <tr key={attendee.id}>
+                          <td>
+                            <div className="attendee-cell">
+                              <div className="attendee-avatar">
+                                {attendee.name
+                                  .split(" ")
+                                  .map((part) => part[0])
+                                  .slice(0, 2)
+                                  .join("")
+                                  .toUpperCase()}
+                              </div>
+
+                              <div>
+                                <strong>{attendee.name}</strong>
+                                <span>{attendee.email}</span>
+                              </div>
+                            </div>
+                          </td>
+
+                          <td>
+                            <code>{attendee.pass_code}</code>
+                          </td>
+
+                          <td>
+                            <span
+                              className={`status-badge ${
+                                attendee.checked_in
+                                  ? "status-checked"
+                                  : "status-pending"
+                              }`}
+                            >
+                              <span />
+                              {attendee.checked_in
+                                ? "Checked in"
+                                : "Pending"}
+                            </span>
+                          </td>
+
+                          <td>
+                            <button
+                              className="table-action"
+                              onClick={() =>
+                                handleCheckIn(attendee.id)
+                              }
+                              disabled={
+                                attendee.checked_in ||
+                                checkingInId !== null
+                              }
+                              title={
+                                attendee.checked_in
+                                  ? "Already checked in"
+                                  : "Check in attendee"
+                              }
+                            >
+                              <ArrowUpRight size={16} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+
+                    {!loading &&
+                      filteredAttendees.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan="4"
+                            className="empty-state"
+                          >
+                            {search.trim()
+                              ? "No matching attendees found."
+                              : "No attendees registered yet. Add your first attendee."}
+                          </td>
+                        </tr>
+                      )}
                   </tbody>
                 </table>
               </div>
 
               <div className="table-footer">
                 <span>
-                  Showing {filteredAttendees.length} of {attendees.length}{" "}
-                  attendees
+                  Showing {filteredAttendees.length} of{" "}
+                  {attendees.length} attendees
                 </span>
+
                 <span className="footer-indicator">
                   <span className="live-dot" />
-                  Updated locally
+                  Connected to API
                 </span>
               </div>
             </section>
@@ -446,6 +558,7 @@ function StatCard({ label, value, detail, icon, variant }) {
         <span>{label}</span>
         <div className={`stat-icon ${variant}`}>{icon}</div>
       </div>
+
       <div className="stat-value">{value}</div>
       <div className="stat-detail">{detail}</div>
     </article>
@@ -453,4 +566,3 @@ function StatCard({ label, value, detail, icon, variant }) {
 }
 
 export default App;
-
