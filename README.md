@@ -9,6 +9,7 @@ GatePass simplifies event attendee registration and entry management through QR-
 - **Frontend:** https://getpass-eta.vercel.app
 - **Backend API:** https://getpass-backend-rzq2.onrender.com
 - **API Documentation:** https://getpass-backend-rzq2.onrender.com/docs
+- **Demonstration Video:** https://drive.google.com/file/d/1Dnuiqk1q3lfaA4Cd1QKCh40DjLM0Zx2n/view?usp=drive_link
 
 ## ✨ Features
 
