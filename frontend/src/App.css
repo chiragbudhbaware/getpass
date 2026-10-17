@@ -1098,3 +1098,75 @@ td code {
     padding: 17px;
   }
 }
+
+
+.scanner-reset-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 11px 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.scanner-reset-button:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.scanner-reset-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+
+
+/* Keep the QR scanner camera at a sensible size */
+#gatepass-qr-reader {
+  width: 100%;
+  max-width: 520px;
+  margin: 20px auto 0;
+  overflow: hidden;
+}
+
+#gatepass-qr-reader video {
+  display: block;
+  width: 100% !important;
+  max-width: 100% !important;
+  max-height: 360px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+/* Prevent oversized scanner controls */
+#gatepass-qr-reader__dashboard {
+  padding: 12px 8px;
+}
+
+#gatepass-qr-reader__dashboard_section_csr,
+#gatepass-qr-reader__dashboard_section_swaplink {
+  max-width: 100%;
+  margin: 8px auto;
+  text-align: center;
+}
+
+#gatepass-qr-reader select {
+  max-width: 100%;
+  font-size: 13px;
+}
+
+#gatepass-qr-reader button {
+  margin: 8px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}

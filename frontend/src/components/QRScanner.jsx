@@ -1,7 +1,12 @@
-
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Html5QrcodeScanner } from "html5-qrcode";
-import { CheckCircle, AlertCircle, ScanLine, Search } from "lucide-react";
+import {
+  CheckCircle,
+  AlertCircle,
+  ScanLine,
+  Search,
+  RotateCcw,
+} from "lucide-react";
 import { checkInAttendee } from "../services/api";
 
 function QRScanner({ onCheckedIn }) {
@@ -9,38 +14,82 @@ function QRScanner({ onCheckedIn }) {
   const [result, setResult] = useState(null);
   const [verifying, setVerifying] = useState(false);
 
-  useEffect(() => {
-    const scanner = new Html5QrcodeScanner(
-      "gatepass-qr-reader",
-      {
-        fps: 10,
-        qrbox: { width: 220, height: 220 },
-        rememberLastUsedCamera: true,
-      },
-      false
-    );
+  // Prevent repeated camera detections from overwriting the current pass.
+  const scanLocked = useRef(false);
 
-    scanner.render(
-      (decodedText) => {
-        // Stop repeated scans while the user reviews the result.
-        scanner.pause(true);
-        setPassCode(decodedText.trim());
-        setResult({
-          type: "info",
-          message: "QR code detected. Click Verify Pass to continue.",
+useEffect(() => {
+  let scanner;
+  let disposed = false;
+
+  async function initializeScanner() {
+    const reader = document.getElementById("gatepass-qr-reader");
+
+    if (!reader) return;
+
+    reader.innerHTML = "";
+
+    try {
+      // Check whether a camera is available and permission is granted.
+      await navigator.mediaDevices.getUserMedia({ video: true })
+        .then((stream) => {
+          stream.getTracks().forEach((track) => track.stop());
         });
-      },
-      () => {
-        // Ignore normal camera frames that do not contain a QR code.
-      }
-    );
 
-    return () => {
+      if (disposed) return;
+
+      scanner = new Html5QrcodeScanner(
+        "gatepass-qr-reader",
+        {
+          fps: 10,
+          qrbox: { width: 220, height: 220 },
+          rememberLastUsedCamera: true,
+        },
+        false
+      );
+
+      scanner.render(
+        (decodedText) => {
+          if (disposed || scanLocked.current) return;
+
+          scanLocked.current = true;
+          setPassCode(decodedText.trim());
+          setResult({
+            type: "info",
+            message: "QR code detected. Verify the pass to continue.",
+          });
+        },
+        () => {
+          // Ignore frames without a QR code.
+        }
+      );
+    } catch (error) {
+      console.error("Camera initialization failed:", error);
+
+      setResult({
+        type: "error",
+        message:
+          error.name === "NotAllowedError"
+            ? "Camera permission is blocked. Allow camera access in your browser settings."
+            : error.name === "NotFoundError"
+              ? "No camera was found. You can still enter a pass code manually."
+              : "Could not start the camera. Check browser permissions and try again.",
+      });
+    }
+  }
+
+  initializeScanner();
+
+  return () => {
+    disposed = true;
+
+    if (scanner) {
       scanner.clear().catch((error) => {
         console.warn("Scanner cleanup:", error);
       });
-    };
-  }, []);
+    }
+  };
+}, []);
+
 
   async function verifyPass(event) {
     event.preventDefault();
@@ -55,6 +104,8 @@ function QRScanner({ onCheckedIn }) {
       return;
     }
 
+    if (verifying) return;
+
     setVerifying(true);
     setResult(null);
 
@@ -67,6 +118,7 @@ function QRScanner({ onCheckedIn }) {
         attendee: response.attendee,
       });
 
+      // Refresh attendee records and dashboard statistics.
       if (onCheckedIn) {
         await onCheckedIn();
       }
@@ -74,14 +126,15 @@ function QRScanner({ onCheckedIn }) {
       const status = error.response?.status;
       const detail = error.response?.data?.detail;
 
-      let message = "Unable to verify this pass. Please try again.";
+      let message = "Unable to verify the pass. Please try again.";
 
       if (status === 404) {
         message = "Invalid pass code. No attendee was found.";
       } else if (status === 409) {
         message = "This attendee has already checked in.";
       } else if (!error.response) {
-        message = "Cannot reach the backend. Check that FastAPI is running.";
+        message =
+          "Cannot reach the backend. Check that FastAPI is running.";
       } else if (typeof detail === "string") {
         message = detail;
       }
@@ -95,6 +148,12 @@ function QRScanner({ onCheckedIn }) {
     }
   }
 
+  function resetScannerForm() {
+    scanLocked.current = false;
+    setPassCode("");
+    setResult(null);
+  }
+
   return (
     <section className="scanner-page">
       <div className="scanner-heading">
@@ -104,13 +163,16 @@ function QRScanner({ onCheckedIn }) {
 
         <div>
           <h2>Event Check-In</h2>
-          <p>Scan an attendee's QR pass or enter the pass code manually.</p>
+          <p>
+            Scan an attendee's QR pass or enter the pass code manually.
+          </p>
         </div>
       </div>
 
       <div className="scanner-layout">
         <div className="panel scanner-panel">
           <h3>Scan QR Code</h3>
+
           <p className="scanner-description">
             Allow camera access when your browser asks for permission.
           </p>
@@ -118,7 +180,7 @@ function QRScanner({ onCheckedIn }) {
           <div id="gatepass-qr-reader" />
 
           <p className="scanner-help">
-            Tip: Ensure the entire QR code is visible inside the scanning box.
+            Keep the entire QR code inside the scanning box.
           </p>
         </div>
 
@@ -128,19 +190,29 @@ function QRScanner({ onCheckedIn }) {
           </div>
 
           <h3>Verify Pass</h3>
+
           <p className="scanner-description">
-            Alternatively, enter the unique pass code printed on the attendee's
-            ticket.
+            Enter the unique pass code printed on the attendee's ticket,
+            or scan the QR code.
           </p>
 
-          <form onSubmit={verifyPass} className="manual-checkin-form">
-            <label htmlFor="pass-code-input">Unique pass code</label>
+          <form
+            onSubmit={verifyPass}
+            className="manual-checkin-form"
+          >
+            <label htmlFor="pass-code-input">
+              Unique pass code
+            </label>
 
             <input
               id="pass-code-input"
               value={passCode}
-              onChange={(event) => setPassCode(event.target.value)}
-              placeholder="e.g. GP-07F3478C"
+              onChange={(event) => {
+                setPassCode(event.target.value);
+                setResult(null);
+                scanLocked.current = true;
+              }}
+              placeholder="Enter or scan a pass code"
               autoComplete="off"
               required
             />
@@ -158,6 +230,7 @@ function QRScanner({ onCheckedIn }) {
             <div
               className={`scanner-result scanner-result-${result.type}`}
               role="status"
+              aria-live="polite"
             >
               {result.type === "success" ? (
                 <CheckCircle size={20} />
@@ -170,7 +243,7 @@ function QRScanner({ onCheckedIn }) {
                   {result.type === "success"
                     ? "Check-in successful"
                     : result.type === "info"
-                      ? "QR detected"
+                      ? "QR code detected"
                       : "Check-in failed"}
                 </strong>
 
@@ -184,6 +257,16 @@ function QRScanner({ onCheckedIn }) {
               </div>
             </div>
           )}
+
+          <button
+            type="button"
+            className="scanner-reset-button"
+            onClick={resetScannerForm}
+            disabled={verifying}
+          >
+            <RotateCcw size={16} />
+            Scan Another Pass
+          </button>
         </div>
       </div>
     </section>
